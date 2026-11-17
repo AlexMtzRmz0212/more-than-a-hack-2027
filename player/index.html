@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Possession Review Player</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #14171c; --panel: #1c2027; --panel-2: #232831; --line: #323945;
+    --text: #e8ebf0; --muted: #98a2b3; --accent: #7aa2ff;
+    /* Kit colours. Home = Barcelona: blue and garnet vertical bands. Away = Athletic, who wear
+       a pale lilac-white in this video. Dead ball belongs to neither team: grey. */
+    --h: #2f6fe4; --on-h: #fff;          /* H  home, Barcelona  = blue   */
+    --a: #e0343a; --on-a: #fff;          /* A  away, Athletic   = red    */
+    --d: #8b95a5; --on-d: #10141a;       /* D  dead ball        = grey   */
+    --x: #ffd60a; --on-x: #231c00;       /* X  no label         = yellow */
+    --ok: #4ade80; --bad: #f87171; --warn: #fbbf24;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f3f5f8; --panel: #fff; --panel-2: #eef1f5; --line: #cfd6e0;
+      --text: #1a2028; --muted: #5a6577; --accent: #1d4ed8;
+      --d: #6b7686; --on-d: #fff; --x: #f2c200; --a: #d62828;
+      --ok: #15803d; --bad: #b91c1c; --warn: #92400e;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden;
+         font: 15px/1.4 system-ui, "Segoe UI", sans-serif; }
+  /* One screen, no page scroll: the app is exactly the window, the video takes whatever height
+     the controls leave, and only the label list may scroll (when there are very many files). */
+  .app { display: grid; grid-template-columns: minmax(0, 1fr) clamp(320px, 26vw, 420px); gap: 12px;
+         padding: 12px; height: 100vh; height: 100dvh; }
+  main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  h1 { flex: none; font-size: 13px; margin: 0 0 6px; font-weight: 600; color: var(--muted);
+       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stagewrap { flex: 1; min-height: 0; container-type: size; display: grid; place-items: center; }
+  .stage { width: min(100cqw, 100cqh * 16 / 9); aspect-ratio: 16 / 9; background: #000;
+           border-radius: 8px; overflow: hidden; position: relative; }
+  video { display: block; width: 100%; height: 100%; object-fit: contain; background: #000;
+          cursor: pointer; }
+  @media (max-width: 1000px) {   /* too narrow for side-by-side: stack and allow scrolling */
+    body { overflow: auto; }
+    .app { grid-template-columns: 1fr; height: auto; }
+    .stagewrap { container-type: normal; }
+    .stage { width: 100%; }
+    .panel { height: auto !important; }
+  }
+  .overlay { position: absolute; left: 24px; top: 10px; background: rgba(0,0,0,.72); color: #fff;
+             padding: 4px 10px; border-radius: 6px; font: 600 18px var(--mono);
+             font-variant-numeric: tabular-nums; pointer-events: none; }
+  .overlay.busy { opacity: .55; }
+  /* Horizontal stripes over the picture, one per row, top to bottom in the same order as the
+     list on the right. The tint is see-through so the match stays visible; the solid bar on
+     the left edge and the letter at the right carry the label when the tint is hard to read. */
+  .vbar { position: absolute; inset: 0; display: flex; flex-direction: column;
+          pointer-events: none; }
+  .vbar.off { display: none; }
+  .track { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .misstag { position: absolute; left: 24px; top: 52px; background: rgba(0,0,0,.72); color: #fff;
+             padding: 2px 10px; border-radius: 6px; font: 600 13px var(--mono);
+             pointer-events: none; }
+  .cell { position: relative; flex: 1; min-height: 0; display: flex; align-items: center;
+          justify-content: flex-end; padding: 0 14px; border-top: 2px solid rgba(0,0,0,.4); }
+  .cell::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 14px;
+                  background: var(--bar, transparent); }
+  .cell:first-child { border-top: 0; }
+  .cell .tag { display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,.62);
+               color: #fff; padding: 2px 12px; border-radius: 8px; white-space: nowrap; }
+  .cell b { font: 700 clamp(18px, 3.4vh, 36px) var(--mono); line-height: 1.1; }
+  .cell small { font: 600 clamp(11px, 1.7vh, 15px) var(--mono); opacity: .9; }
+  .cell.H { --bar: var(--h); background: color-mix(in srgb, var(--h) 42%, transparent); }
+  .cell.A { --bar: var(--a); background: color-mix(in srgb, var(--a) 42%, transparent); }
+  .cell.D { --bar: var(--d); background: color-mix(in srgb, var(--d) 45%, transparent); }
+  .cell.X { --bar: var(--x); background: color-mix(in srgb, var(--x) 30%, transparent); }
+  .msg { position: absolute; inset: 0; display: none; place-items: center; text-align: center;
+         padding: 24px; color: #fff; background: rgba(0,0,0,.8); }
+  .msg.show { display: grid; }
+  .controls { flex: none; margin-top: 8px; background: var(--panel); border: 1px solid var(--line);
+              border-radius: 8px; padding: 8px 12px; }
+  .readout { display: flex; flex-wrap: wrap; gap: 2px 20px; align-items: baseline;
+             font-variant-numeric: tabular-nums; margin-bottom: 2px; }
+  .readout .big { font: 600 20px var(--mono); }
+  .readout .dim { color: var(--muted); font-size: 13px; }
+  input[type=range] { width: 100%; height: 22px; margin: 0; accent-color: var(--accent); }
+  .btns { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin-top: 6px; }
+  button, select, input[type=number] {
+    font: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 4px 12px; min-height: 34px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent);
+    outline-offset: 1px; }
+  button.primary { background: var(--accent); color: #0b1020; border-color: var(--accent);
+                   font-weight: 600; min-width: 84px; }
+  input[type=number] { width: 112px; }
+  .sp { flex: 1; }
+  .src { font-size: 13px; color: var(--muted); }
+  .src:not(:empty) { margin-top: 6px; }
+  .src b { color: var(--text); }
+  .src .warn { color: var(--warn); }
+  .src .good { color: var(--ok); }
+  /* The accuracy notes open as a popover above the bar, so opening them never moves the video. */
+  details { flex: none; position: relative; margin-top: 8px; background: var(--panel);
+            border: 1px solid var(--line); border-radius: 8px; padding: 6px 14px; font-size: 14px; }
+  summary { cursor: pointer; font-weight: 600; }
+  details .acc { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 10;
+                 max-height: 75vh; overflow: auto; background: var(--panel);
+                 border: 1px solid var(--line); border-radius: 8px; padding: 6px 18px 10px;
+                 box-shadow: 0 12px 32px rgba(0,0,0,.45); }
+  details ul { margin: 4px 0 0; padding-left: 20px; }
+  details li { margin: 4px 0; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+           padding: 8px 12px; height: 100%; min-height: 0; display: flex; flex-direction: column;
+           overflow: hidden; }
+  .panel > h2 { flex: none; font-size: 12px; margin: 0 0 4px; color: var(--muted); font-weight: 600;
+                text-transform: uppercase; letter-spacing: .04em; }
+  #rows { flex: 1; min-height: 0; overflow-y: auto; }
+  .legend { flex: none; }
+  .row { padding: 6px 0; border-top: 1px solid var(--line); }
+  .row:first-of-type { border-top: 0; }
+  .row-head { display: flex; justify-content: space-between; gap: 8px; font-size: 13px;
+              color: var(--muted); margin-bottom: 4px; }
+  .row-head .name { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+  .row.gt .name::after { content: " ★"; color: var(--warn); }
+  .verdict { white-space: nowrap; font-weight: 600; }
+  .verdict.ok { color: var(--ok); } .verdict.bad { color: var(--bad); }
+  .row-main { display: flex; align-items: center; gap: 10px; }
+  .chip { flex: none; width: 30px; height: 30px; display: grid; place-items: center;
+          border-radius: 6px; font: 700 17px var(--mono); background: var(--x); color: #fff; }
+  .chip.H { background: var(--h); color: var(--on-h); }
+  .chip.A { background: var(--a); color: var(--on-a); }
+  .chip.D { background: var(--d); color: var(--on-d); }
+  .chip.X { background: var(--x); color: var(--on-x); }
+  .desc { flex: 1; min-width: 0; font-size: 14px; }
+  .desc.unavail { color: var(--muted); font-style: italic; }
+  .jump { display: flex; gap: 4px; flex: none; }
+  .jump button { min-height: 30px; padding: 2px 8px; }
+  canvas.strip { display: block; width: 100%; height: 12px; margin-top: 5px; border-radius: 3px;
+                 background: var(--panel-2); }
+  .bad-row .desc { color: var(--bad); font-size: 13px; }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted);
+            border-top: 1px solid var(--line); padding-top: 8px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+              margin-right: 4px; vertical-align: -1px; }
+  kbd { font: 12px var(--mono); background: var(--panel-2); border: 1px solid var(--line);
+        border-radius: 4px; padding: 0 5px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <main>
+    <h1 id="title">Possession review — tactical video</h1>
+    <div class="stagewrap">
+      <div class="stage">
+        <video id="video" preload="auto" playsinline muted></video>
+        <div class="vbar" id="vbar"></div>
+        <canvas class="track" id="track"></canvas>
+        <div class="overlay" id="overlay">frame –</div>
+        <div class="misstag" id="ballTag" hidden>ball not tracked on this frame</div>
+        <div class="msg" id="msg"></div>
+      </div>
+    </div>
+
+    <section class="controls">
+      <div class="readout">
+        <span class="big" id="frameBig">Frame –</span>
+        <span class="dim" id="clock">–</span>
+        <span class="dim" id="srcState">–</span>
+        <span class="dim" id="trackState"></span>
+      </div>
+      <input type="range" id="slider" min="0" max="0" step="1" value="0" aria-label="Seek by frame">
+      <div class="btns">
+        <button id="back1s" title="Back 25 frames (Shift+Left)">−1 s</button>
+        <button id="back1" title="Back one frame (Left)">◂ −1 frame</button>
+        <button id="play" class="primary" title="Play / pause (Space)">Play</button>
+        <button id="fwd1" title="Forward one frame (Right)">+1 frame ▸</button>
+        <button id="fwd1s" title="Forward 25 frames (Shift+Right)">+1 s</button>
+        <span class="sp"></span>
+        <label>Speed
+          <select id="rate">
+            <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option><option value="2">2×</option>
+          </select>
+        </label>
+      </div>
+      <div class="btns">
+        <label>Go to frame <input type="number" id="goto" min="0" step="1"></label>
+        <button id="gotoBtn">Go</button>
+        <button id="pubBtn">Start of public ground truth</button>
+        <label><input type="checkbox" id="vbarToggle" checked> Colors on video</label>
+        <span id="trackToggles" hidden>
+          <label><input type="checkbox" id="ballToggle" checked> Ball</label>
+          <label><input type="checkbox" id="playersToggle" checked> Players</label>
+        </span>
+      </div>
+      <div class="src" id="note"></div>
+    </section>
+
+    <details id="accuracy">
+      <summary>How accurate is the frame number? (read this before trusting a transition)</summary>
+      <div class="acc"><ul>
+        <li>The video is constant 25 fps, so frame <i>n</i> is shown at <i>n</i>/25 s. A label is
+          always looked up with the <b>frame number the video decoder reports as on screen</b>
+          (<code>requestVideoFrameCallback</code>), never with a number the page guessed.</li>
+        <li><b>Paused, stepping and seeking are frame-exact.</b> A seek aims at the <i>middle</i> of
+          frame <i>n</i> (<i>n</i> + ½)/25 s so rounding cannot land on a neighbour. Labels switch
+          only once the new picture is presented; if the browser lands on a different frame than
+          requested, the number shown is the one actually on screen and a notice says so.</li>
+        <li><b>While playing, the label can trail the picture by up to one frame (40 ms)</b> because
+          the browser reports a frame when it is composed. If the screen cannot draw every frame,
+          the readout skips frames too; it never shows a label for a frame that was not on screen.
+          To judge a transition, pause and step.</li>
+        <li><b>Estimated mode.</b> If the browser has no <code>requestVideoFrameCallback</code>, or
+          it goes quiet (some embedded browsers never call it), the frame comes from the playback
+          clock instead: ±1 frame while playing, and the readout says <i>estimated</i>. Paused
+          positions are still checked against the clock after every seek. Use desktop Chrome or
+          Edge for the exact mode.</li>
+        <li>This is the tactical video only. The broadcast recording is not aligned to the
+          submission rows and is not used here.</li>
+        <li>Burned-in clock and the tracking counter are not shown: the label rows come from the
+          <code>frame</code> column of each CSV, which is the video frame index (0-based).</li>
+      </ul></div>
+    </details>
+  </main>
+
+  <aside class="panel">
+    <h2>Labels at this frame</h2>
+    <div id="rows"></div>
+    <div class="legend">
+      <span><i style="background:var(--h)"></i>H home (Barcelona)</span>
+      <span><i style="background:var(--a)"></i>A away (Athletic)</span>
+      <span><i style="background:var(--d)"></i>D dead ball</span>
+      <span><i style="background:var(--x)"></i>X no label</span>
+    </div>
+    <div class="legend" style="border:0;padding-top:4px">
+      Strips show ±250 frames (±10 s); the white line is the current frame. ◂ ▸ jump to the previous
+      / next change of that row. <kbd>Space</kbd> play · <kbd>←</kbd><kbd>→</kbd> step ·
+      <kbd>Shift</kbd>+arrow = 25 frames.
+    </div>
+  </aside>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const video = $("video"), slider = $("slider");
+const HAS_RVFC = "requestVideoFrameCallback" in HTMLVideoElement.prototype;
+const STRIP_HALF = 250;
+
+let info, FPS, N, LAST;
+let rows = [];                // {name, gt, ok, reason, labels, els}
+let frame = 0;                // frame currently on screen, as best known
+let frameSource = "none";     // "decoder" | "clock"
+let pending = null;           // frame we asked for and have not seen presented yet
+let landedNote = "";
+let dragging = false;
+let fallbackTimer = null;
+let colors = {};
+
+const clamp = (f) => Math.max(0, Math.min(LAST, Math.trunc(f)));
+const frameOfClock = (t) => clamp(Math.floor(t * FPS + 1e-4));
+const stamp = (f) => {
+  const s = Math.floor(f / FPS), m = Math.floor(s / 60);
+  return `${m}:${String(s % 60).padStart(2, "0")}+${String(f % FPS).padStart(2, "0")}`;
+};
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+function readColors() {
+  const cs = getComputedStyle(document.documentElement);
+  for (const k of ["h", "a", "d", "x", "text", "panel-2"]) colors[k] = cs.getPropertyValue("--" + k).trim();
+}
+matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => { readColors(); render(); });
+
+function showMsg(html) { const m = $("msg"); m.innerHTML = html; m.classList.add("show"); }
+
+// ---------------------------------------------------------------------------------------------
+// Frame tracking: the single place that decides which frame the labels are for
+// ---------------------------------------------------------------------------------------------
+function setFrame(f, source) {
+  frame = clamp(f);
+  frameSource = source;
+  render();
+}
+
+function onPresented(now, meta) {
+  // meta.mediaTime is the presentation timestamp of the frame the browser just composed.
+  const f = clamp(Math.round(meta.mediaTime * FPS));
+  clearTimeout(fallbackTimer);
+  lastDecoderAt = performance.now();
+  if (pending !== null && !video.seeking) {
+    landedNote = f === pending ? "" : `Asked for frame ${pending}, the browser showed frame ${f}.`;
+    pending = null;
+  }
+  setFrame(f, "decoder");
+  video.requestVideoFrameCallback(onPresented);
+}
+
+// Watchdog. If requestVideoFrameCallback is missing, or exists but has gone quiet (some embedded
+// browsers never call it), playback would freeze the labels. While playing, and the decoder has
+// not reported for 150 ms, read the playback clock instead and say so in the readout.
+let lastDecoderAt = 0;
+function clockTick() {
+  if (!video.paused && !video.seeking && performance.now() - lastDecoderAt > 150) {
+    const f = frameOfClock(video.currentTime);
+    if (f !== frame || frameSource !== "clock") setFrame(f, "clock");
+  }
+}
+setInterval(clockTick, 20);   // a timer, not rAF: rAF stops entirely in a hidden or occluded pane
+
+video.addEventListener("seeked", () => {
+  // The decoder callback normally follows within a frame or two. If it never comes (no API, or
+  // the browser skipped it), fall back to the clock rather than leave the labels stale.
+  clearTimeout(fallbackTimer);
+  fallbackTimer = setTimeout(() => {
+    if (pending !== null) { landedNote = ""; pending = null; }
+    setFrame(frameOfClock(video.currentTime), "clock");
+  }, HAS_RVFC ? 400 : 0);
+});
+video.addEventListener("play", render);
+video.addEventListener("pause", () => {
+  if (!HAS_RVFC) setFrame(frameOfClock(video.currentTime), "clock");
+  render();
+});
+video.addEventListener("ended", render);
+
+function seekTo(f) {
+  f = clamp(f);
+  if (f === frame && pending === null) return;
+  pending = f;
+  landedNote = "";
+  video.currentTime = (f + 0.5) / FPS;   // middle of the frame interval, so rounding cannot slip
+  render();
+}
+
+function step(delta) {
+  const base = pending !== null ? pending : frame;   // rapid key repeats accumulate
+  video.pause();
+  seekTo(base + delta);
+}
+
+function togglePlay() {
+  if (video.paused) { if (frame >= LAST) seekTo(0); video.play(); } else video.pause();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------------------------
+const LONG = () => info.label_names;
+
+function describe(row, c) {
+  if (c === "X") {
+    return row.gt
+      ? { text: `Unavailable: no public ground truth for this frame (public window is frames ${info.public_window[0]}–${info.public_window[1]})`, cls: "unavail" }
+      : { text: "No answer (this file abstains here)", cls: "unavail" };
+  }
+  return { text: cap(LONG()[c] || c), cls: "" };
+}
+
+function render() {
+  const busy = pending !== null || video.seeking;
+  $("overlay").textContent = `frame ${frame}`;
+  $("overlay").classList.toggle("busy", busy);
+  $("frameBig").textContent = `Frame ${frame} / ${LAST}`;
+  $("clock").textContent = `video ${stamp(frame)} (m:ss+frames) · ${(frame / FPS).toFixed(2)} s`;
+  const est = frameSource === "clock";
+  $("srcState").innerHTML = busy ? "seeking…"
+    : frameSource === "none" ? "–"
+    : est ? '<span class="warn">frame estimated from the clock (±1 frame)</span>'
+    : '<span class="good">frame reported by the decoder</span>';
+  $("play").textContent = video.paused ? "Play" : "Pause";
+  if (!dragging) slider.value = frame;
+  $("note").textContent = landedNote;
+
+  const gtRow = rows.find((r) => r.gt && r.ok);
+  const gtLabel = gtRow ? gtRow.labels[frame] : "X";
+  for (const row of rows) {
+    if (!row.ok) continue;
+    const c = row.labels[frame];
+    row.els.chip.textContent = c;
+    row.els.chip.className = "chip " + c;
+    row.els.cell.className = "cell " + c;
+    row.els.cell.querySelector("b").textContent = c;
+    const d = describe(row, c);
+    row.els.desc.textContent = d.text;
+    row.els.desc.className = "desc " + d.cls;
+    if (!row.gt) {
+      const v = row.els.verdict;
+      if (gtLabel === "X") { v.textContent = "no GT here"; v.className = "verdict"; }
+      else if (c === "X") { v.textContent = "no answer"; v.className = "verdict bad"; }
+      else if (c === gtLabel) { v.textContent = "✓ matches GT"; v.className = "verdict ok"; }
+      else { v.textContent = `✗ GT is ${gtLabel}`; v.className = "verdict bad"; }
+    }
+    drawStrip(row);
+  }
+  drawTracking();
+}
+
+function drawStrip(row) {
+  const cv = row.els.strip, dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w) return;
+  if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const g = cv.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const cols = STRIP_HALF * 2 + 1, cw = w / cols;
+  for (let k = -STRIP_HALF; k <= STRIP_HALF; k++) {
+    const f = frame + k;
+    if (f < 0 || f > LAST) continue;
+    const c = row.labels[f];
+    g.fillStyle = colors[c.toLowerCase()];
+    g.fillRect((k + STRIP_HALF) * cw, 0, Math.ceil(cw), h);
+  }
+  g.fillStyle = "#fff"; g.fillRect(STRIP_HALF * cw - 1, 0, 1, h);
+  g.fillStyle = "#000"; g.fillRect(STRIP_HALF * cw + cw, 0, 1, h);
+}
+window.addEventListener("resize", render);
+
+// ---------------------------------------------------------------------------------------------
+// Tracking overlay: ball and players from the ATD, placed on the picture with the per-frame
+// homography. ATD record i is video frame i (DATA.md: video_frame = frame_id - 1), the same index
+// the labels use, so it is drawn for exactly the frame the labels are for.
+// ---------------------------------------------------------------------------------------------
+const TRACK_CHUNK = 100;
+const track = { available: false, chunks: new Map(), loading: new Set(), error: "", pitch: [105.3, 68] };
+const trackCanvas = $("track");
+const chunkOf = (f) => Math.floor(f / TRACK_CHUNK);
+const trackAt = (f) => { const c = track.chunks.get(chunkOf(f)); return c ? c[f % TRACK_CHUNK] : undefined; };
+
+async function loadChunk(ci) {
+  if (ci < 0 || ci * TRACK_CHUNK > LAST || track.chunks.has(ci) || track.loading.has(ci)) return;
+  track.loading.add(ci);
+  try {
+    const res = await fetch(`/api/tracking?start=${ci * TRACK_CHUNK}&count=${TRACK_CHUNK}`);
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error);
+    track.chunks.set(ci, body.frames);
+    if (track.chunks.size > 60) track.chunks.delete(track.chunks.keys().next().value);
+    if (chunkOf(frame) === ci) drawTracking();     // it was the one on screen
+  } catch (e) { track.error = String(e.message || e); drawTracking(); }
+  finally { track.loading.delete(ci); }
+}
+
+// Normalised pitch (0-1) -> video pixels, matrix row-major as in the homography CSV.
+const project = (H, x, y) => {
+  const d = H[6] * x + H[7] * y + H[8];
+  return [(H[0] * x + H[1] * y + H[2]) / d, (H[3] * x + H[4] * y + H[5]) / d];
+};
+
+function drawTracking() {
+  if (!track.available) return;
+  const w = trackCanvas.clientWidth, h = trackCanvas.clientHeight;
+  if (!w) return;
+  const dpr = window.devicePixelRatio || 1;
+  if (trackCanvas.width !== Math.round(w * dpr)) { trackCanvas.width = Math.round(w * dpr); trackCanvas.height = Math.round(h * dpr); }
+  const g = trackCanvas.getContext("2d");
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, trackCanvas.width, trackCanvas.height);
+  const state = $("trackState"), tag = $("ballTag");
+  tag.hidden = true;
+
+  loadChunk(chunkOf(frame));
+  if (frame % TRACK_CHUNK > TRACK_CHUNK - 30) loadChunk(chunkOf(frame) + 1);   // ahead while playing
+  if (frame % TRACK_CHUNK < 10) loadChunk(chunkOf(frame) - 1);                 // and when stepping back
+  const t = trackAt(frame);
+  if (!t) { state.textContent = track.error ? "tracking unavailable: " + track.error : "tracking loading…"; return; }
+  if (!t.h) { state.textContent = "no pitch matrix for this frame"; return; }
+
+  const s = trackCanvas.width / 1920;              // video pixels -> canvas pixels (stage is 16:9)
+  const [PX, PY] = track.pitch;
+  const ball = t.b;
+  let nearest = null;
+  if (ball) {
+    for (const p of t.p) {
+      const d = Math.hypot((p[0] - ball[0]) * PX, (p[1] - ball[1]) * PY);
+      if (!nearest || d < nearest.d) nearest = { p, d };
+    }
+  }
+
+  if ($("playersToggle").checked) {
+    for (const [x, y, team] of t.p) {
+      const [px, py] = project(t.h, x, y);
+      // ring size from the matrix: 0.9 m along each pitch axis, so near players are drawn bigger
+      const [ax, ay] = project(t.h, x + 0.9 / PX, y), [bx, by] = project(t.h, x, y + 0.9 / PY);
+      const rx = Math.max(5, Math.hypot(ax - px, ay - py)) * s, ry = Math.max(3, Math.hypot(bx - px, by - py)) * s;
+      g.beginPath(); g.ellipse(px * s, py * s, rx, ry, 0, 0, 7);
+      if (team === "H") { g.fillStyle = "rgba(47,111,228,.55)"; g.strokeStyle = "#2f6fe4"; }
+      else { g.fillStyle = "rgba(224,52,58,.55)"; g.strokeStyle = "#e0343a"; }
+      g.lineWidth = 3 * s + 1;
+      g.fill(); g.stroke();
+    }
+  }
+  if (ball) {
+    const [bx, by] = project(t.h, ball[0], ball[1]);
+    if (nearest && $("playersToggle").checked) {   // the player the baselines would credit
+      const [px, py] = project(t.h, nearest.p[0], nearest.p[1]);
+      g.save(); g.setLineDash([8 * s + 3, 6 * s + 3]);       // black halo under a white line
+      g.beginPath(); g.moveTo(px * s, py * s); g.lineTo(bx * s, by * s);
+      g.strokeStyle = "#000"; g.lineWidth = 5 * s + 2; g.stroke();
+      g.strokeStyle = "#fff"; g.lineWidth = 2.5 * s + 1; g.stroke(); g.restore();
+      g.beginPath(); g.ellipse(px * s, py * s, 16 * s + 3, 8 * s + 2, 0, 0, 7);
+      g.strokeStyle = "#000"; g.lineWidth = 6 * s + 2; g.stroke();
+      g.strokeStyle = "#fff"; g.lineWidth = 3 * s + 1; g.stroke();
+    }
+    if ($("ballToggle").checked) {
+      g.beginPath(); g.arc(bx * s, by * s, 17 * s + 3, 0, 7);
+      g.strokeStyle = "rgba(255,230,0,.95)"; g.lineWidth = 2.5 * s + 1; g.stroke();
+      g.beginPath(); g.arc(bx * s, by * s, 6 * s + 2, 0, 7);
+      g.fillStyle = "#ffe600"; g.fill(); g.strokeStyle = "#000"; g.lineWidth = 2 * s + 1; g.stroke();
+    }
+  }
+  if (ball && nearest) {
+    state.textContent = `ball tracked · nearest ${nearest.p[2] === "H" ? "Barcelona" : "Athletic"} ${nearest.d.toFixed(1)} m`;
+  } else {
+    state.textContent = "ball not tracked on this frame";
+    tag.hidden = !$("ballToggle").checked;
+  }
+}
+new ResizeObserver(() => drawTracking()).observe(trackCanvas);
+
+function changeFrame(s, f, dir) {
+  if (dir > 0) {
+    const c = s[f]; let i = f + 1;
+    while (i <= LAST && s[i] === c) i++;
+    return i <= LAST ? i : null;
+  }
+  let i = f;
+  while (i > 0 && s[i - 1] === s[i]) i--;
+  if (i < f) return i;
+  if (f === 0) return null;
+  const c = s[f - 1]; let j = f - 1;
+  while (j > 0 && s[j - 1] === c) j--;
+  return j;
+}
+
+function buildRows() {
+  const host = $("rows"), vbar = $("vbar");
+  host.innerHTML = "";
+  vbar.innerHTML = "";
+  for (const row of rows) {
+    const el = document.createElement("div");
+    el.className = "row" + (row.gt ? " gt" : "") + (row.ok ? "" : " bad-row");
+    el.innerHTML = `<div class="row-head"><span class="name"></span><span class="verdict"></span></div>
+      <div class="row-main"><span class="chip X">–</span><span class="desc"></span>
+      <span class="jump"><button class="prev" title="Previous change">◂</button><button class="next" title="Next change">▸</button></span></div>
+      <canvas class="strip"></canvas>`;
+    el.querySelector(".name").textContent = row.gt ? "Ground truth (public)" : row.name;
+    row.els = { chip: el.querySelector(".chip"), desc: el.querySelector(".desc"),
+                verdict: el.querySelector(".verdict"), strip: el.querySelector(".strip") };
+    if (!row.ok) {
+      el.querySelector(".desc").textContent = "Not shown: " + row.reason;
+      el.querySelector(".chip").textContent = "!";
+      el.querySelector(".jump").remove(); el.querySelector(".strip").remove();
+    } else {
+      const go = (dir) => (e) => { e.currentTarget.blur(); video.pause();
+        const t = changeFrame(row.labels, pending !== null ? pending : frame, dir);
+        if (t !== null) seekTo(t); };
+      el.querySelector(".prev").addEventListener("click", go(-1));
+      el.querySelector(".next").addEventListener("click", go(1));
+    }
+    host.appendChild(el);
+    if (row.ok) {   // the same label, large, on the video itself
+      const cell = document.createElement("div");
+      cell.innerHTML = '<span class="tag"><b>–</b><small></small></span>';
+      cell.querySelector("small").textContent = row.gt ? "GT" : row.name.replace(/^baseline_/, "");
+      cell.title = row.gt ? "Public ground truth" : row.name;
+      row.els.cell = cell;
+      vbar.appendChild(cell);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Start-up
+// ---------------------------------------------------------------------------------------------
+async function init() {
+  readColors();
+  try {
+    info = await (await fetch("/api/info")).json();
+  } catch (e) { showMsg("Cannot reach the local server. Is the black window still open?"); return; }
+  FPS = info.fps; N = info.n_frames; LAST = N - 1;
+  slider.max = LAST; $("goto").max = LAST;
+  const [p0, p1] = info.public_window;
+  slider.style.background = `linear-gradient(to right, transparent ${100 * p0 / LAST}%, color-mix(in srgb, var(--warn) 55%, transparent) ${100 * p0 / LAST}%, color-mix(in srgb, var(--warn) 55%, transparent) ${100 * p1 / LAST}%, transparent ${100 * p1 / LAST}%)`;
+  $("pubBtn").title = `Frames ${p0}–${p1}: the only frames that have public labels`;
+
+  rows = info.sources.map((s) => ({ name: s.name, gt: s.gt, ok: s.ok, reason: s.reason, labels: null, els: null }));
+  await Promise.all(rows.filter((r) => r.ok).map(async (row) => {
+    const res = await fetch("/api/labels/" + encodeURIComponent(row.name));
+    const body = await res.json();
+    if (!res.ok) { row.ok = false; row.reason = body.error; return; }
+    if (body.labels.length !== N) { row.ok = false; row.reason = `got ${body.labels.length} labels, expected ${N}`; return; }
+    row.labels = body.labels;
+  }));
+  buildRows();
+  if (info.tracking && info.tracking.available) {
+    track.available = true; track.pitch = info.tracking.pitch_m;
+    $("trackToggles").hidden = false;
+    loadChunk(0);
+  }
+  $("title").textContent = `Possession review — ${info.game} tactical video · ${info.fps} fps · ${N} frames · ${rows.filter((r) => !r.gt && r.ok).length} prediction file(s)`;
+
+  video.addEventListener("error", () => showMsg(
+    "The browser could not play the video. Use a current Chrome or Edge (H.264 video), " +
+    "and check that the server window shows the right video path."));
+  video.addEventListener("loadedmetadata", () => {
+    const frames = video.duration * FPS;
+    if (Math.abs(frames - N) > 1.5)
+      $("note").innerHTML = `<span class="warn">Video reports ${frames.toFixed(1)} frames but the CSVs have ${N}. Labels may be misaligned — do not trust this video.</span>`;
+    setFrame(0, "none");   // the first presented frame replaces this with a decoder-reported one
+  });
+  video.src = "/video";
+  if (HAS_RVFC) video.requestVideoFrameCallback(onPresented);
+  render();
+}
+
+// -- controls ---------------------------------------------------------------------------------
+const click = (id, fn) => $(id).addEventListener("click", (e) => { e.currentTarget.blur(); fn(); });
+click("play", togglePlay);
+click("back1", () => step(-1));
+click("fwd1", () => step(1));
+click("back1s", () => step(-FPS));
+click("fwd1s", () => step(FPS));
+click("pubBtn", () => { video.pause(); seekTo(info.public_window[0]); });
+click("gotoBtn", () => { const v = parseInt($("goto").value, 10); if (!Number.isNaN(v)) { video.pause(); seekTo(v); } });
+$("vbarToggle").addEventListener("change", (e) => { $("vbar").classList.toggle("off", !e.target.checked); e.target.blur(); });
+for (const id of ["ballToggle", "playersToggle"])
+  $(id).addEventListener("change", (e) => { drawTracking(); e.target.blur(); });
+$("goto").addEventListener("keydown", (e) => { if (e.key === "Enter") $("gotoBtn").click(); e.stopPropagation(); });
+$("rate").addEventListener("change", (e) => { video.playbackRate = parseFloat(e.target.value); e.target.blur(); });
+video.addEventListener("click", togglePlay);
+slider.addEventListener("pointerdown", () => { dragging = true; });
+window.addEventListener("pointerup", () => { dragging = false; slider.value = frame; });
+slider.addEventListener("input", () => { video.pause(); seekTo(parseInt(slider.value, 10)); });
+document.addEventListener("keydown", (e) => {
+  if ((e.target.matches && e.target.matches("input[type=number], select")) || e.ctrlKey || e.metaKey || e.altKey) return;
+  const n = e.shiftKey ? FPS : 1;
+  if (e.key === " ") togglePlay();
+  else if (e.key === "ArrowLeft") step(-n);
+  else if (e.key === "ArrowRight") step(n);
+  else return;
+  e.preventDefault();
+});
+
+init();
+</script>
+</body>
+</html>
