@@ -1,0 +1,85 @@
+{
+  "window": [
+    11185,
+    18684
+  ],
+  "frames": 7500,
+  "states": {
+    "H": {
+      "frames": 3454,
+      "ball_tracked_pct": 99.9,
+      "speed_median": 5.29,
+      "speed_p25": 2.62,
+      "speed_p75": 9.92,
+      "nearest_median_m": 1.64,
+      "within_2m_pct": 56.7,
+      "opponent_pressure_median_m": 7.5,
+      "speed_hist_pct": [
+        16.1,
+        23.4,
+        14.6,
+        11.1,
+        10.3,
+        6.1,
+        8.2,
+        8.7,
+        1.5
+      ]
+    },
+    "A": {
+      "frames": 2577,
+      "ball_tracked_pct": 85.0,
+      "speed_median": 6.57,
+      "speed_p25": 2.65,
+      "speed_p75": 11.27,
+      "nearest_median_m": 1.68,
+      "within_2m_pct": 55.2,
+      "opponent_pressure_median_m": 5.39,
+      "speed_hist_pct": [
+        17.8,
+        14.9,
+        14.3,
+        11.0,
+        10.1,
+        10.5,
+        10.7,
+        6.3,
+        4.5
+      ]
+    },
+    "D": {
+      "frames": 1469,
+      "ball_tracked_pct": 66.4,
+      "speed_median": 2.72,
+      "speed_p25": 1.42,
+      "speed_p75": 5.72,
+      "nearest_median_m": 2.89,
+      "within_2m_pct": 39.8,
+      "opponent_pressure_median_m": 16.86,
+      "speed_hist_pct": [
+        39.4,
+        24.4,
+        13.1,
+        10.4,
+        3.7,
+        4.8,
+        2.3,
+        1.7,
+        0.1
+      ]
+    }
+  },
+  "nearest_player_agrees_pct": 77.8,
+  "speed_bins": [
+    0,
+    2,
+    4,
+    6,
+    8,
+    10,
+    12,
+    15,
+    20,
+    30
+  ]
+}
