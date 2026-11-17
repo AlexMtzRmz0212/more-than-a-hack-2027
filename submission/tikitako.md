@@ -1,6 +1,7 @@
 # Possession has a shape — Team TikiTako (solo entry, Alex Martinez)
 
-**Presentation:** `presentation/index.html` in this repository (open it in a browser; press Space to move down).
+**Presentation:** https://alexmtzrmz0212.github.io/more-than-a-hack-2027/presentation/ (source: `presentation/index.html`; press Space to move down).
+**Repository:** https://github.com/AlexMtzRmz0212/more-than-a-hack-2027/tree/Alex
 
 ## Honest status
 
